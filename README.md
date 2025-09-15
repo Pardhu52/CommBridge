@@ -65,7 +65,7 @@ Make sure you have Node.js (v18 or later) and pnpm installed on your machine.
 
 1.  **Clone the repository:**
     ```sh
-    git clone (https://github.com/Pardhu52/CommBridge.git)
+    git clone https://github.com/Pardhu52/CommBridge.git
     ```
 2.  **Navigate into the project directory:**
     ```sh
@@ -105,7 +105,8 @@ The easiest way to deploy this Next.js application is to use the Vercel Platform
 Alternatively, you can use Firebase Hosting to keep your entire stack within the Firebase ecosystem.
 
 👤 Contact
-Pardhu
+
+Pardha Saradi Raju 
 
 GitHub: @Pardhu52
 
