@@ -1,10 +1,12 @@
 "use client"
 
+import { useState } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { MessageCircle, Calendar, AlertTriangle, CheckCircle, Users, ArrowRight } from "lucide-react"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
 interface Activity {
   id: string
@@ -26,9 +28,11 @@ interface Activity {
 interface RecentActivityProps {
   activities: Activity[]
   onViewAll?: () => void
+  onResolveIssue?: (id: string) => void
 }
 
-export function RecentActivity({ activities, onViewAll }: RecentActivityProps) {
+export function RecentActivity({ activities, onViewAll, onResolveIssue }: RecentActivityProps) {
+  const [filter, setFilter] = useState<"all" | "post" | "event" | "issue">("all")
   const getActivityIcon = (type: string) => {
     switch (type) {
       case "post":
@@ -71,17 +75,27 @@ export function RecentActivity({ activities, onViewAll }: RecentActivityProps) {
             <CardTitle>Recent Activity</CardTitle>
             <CardDescription>Latest updates from your community</CardDescription>
           </div>
-          {onViewAll && (
-            <Button variant="ghost" size="sm" onClick={onViewAll}>
-              View All
-              <ArrowRight className="w-4 h-4 ml-1" />
-            </Button>
-          )}
+          <div className="flex items-center gap-2">
+            <Tabs value={filter} onValueChange={(v) => setFilter(v as any)}>
+              <TabsList className="grid grid-cols-4">
+                <TabsTrigger value="all">All</TabsTrigger>
+                <TabsTrigger value="post">Posts</TabsTrigger>
+                <TabsTrigger value="event">Events</TabsTrigger>
+                <TabsTrigger value="issue">Issues</TabsTrigger>
+              </TabsList>
+            </Tabs>
+            {onViewAll && (
+              <Button variant="ghost" size="sm" onClick={onViewAll}>
+                View All
+                <ArrowRight className="w-4 h-4 ml-1" />
+              </Button>
+            )}
+          </div>
         </div>
       </CardHeader>
       <CardContent>
         <div className="space-y-4">
-          {activities.map((activity) => (
+          {(filter === 'all' ? activities : activities.filter(a => a.type === filter)).map((activity) => (
             <div key={activity.id} className="flex items-start gap-3 p-3 border rounded-lg hover:bg-muted/50">
               <div className="w-10 h-10 bg-muted rounded-full flex items-center justify-center">
                 {getActivityIcon(activity.type)}
@@ -114,6 +128,11 @@ export function RecentActivity({ activities, onViewAll }: RecentActivityProps) {
                       </span>
                     )}
                     <span>{activity.timestamp}</span>
+                    {activity.type === 'issue' && onResolveIssue && (
+                      <Button variant="link" className="p-0 h-auto text-xs" onClick={() => onResolveIssue(activity.id)}>
+                        Mark Resolved
+                      </Button>
+                    )}
                   </div>
                 </div>
               </div>

@@ -7,6 +7,7 @@ import {
   RecaptchaVerifier,
   signInWithPhoneNumber,
   ConfirmationResult,
+  sendPasswordResetEmail,
 } from "firebase/auth"
 import { auth } from "../../lib/firebase" // Corrected import path
 
@@ -18,6 +19,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ArrowLeft, KeyRound, Loader2, Mail, Phone } from "lucide-react"
 import Link from "next/link"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 
 // This is to safely attach Firebase objects to the window for the reCAPTCHA to work
 declare global {
@@ -36,6 +38,10 @@ export default function LoginPage() {
   const [step, setStep] = useState<"credentials" | "otp">("credentials")
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
+  const [resetOpen, setResetOpen] = useState(false)
+  const [resetEmail, setResetEmail] = useState("")
+  const [resetLoading, setResetLoading] = useState(false)
+  const [resetMsg, setResetMsg] = useState("")
 
   // This effect sets up the invisible reCAPTCHA verifier required for phone authentication
   useEffect(() => {
@@ -71,6 +77,22 @@ export default function LoginPage() {
       }
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleSendReset = async () => {
+    const targetEmail = (resetEmail || email).trim();
+    if (!targetEmail) { setResetMsg(""); setError("Please enter your email address."); return; }
+    setResetLoading(true); setError(""); setResetMsg("");
+    try {
+      await sendPasswordResetEmail(auth, targetEmail);
+      setResetMsg(`Password reset email sent to ${targetEmail}. Check your inbox and spam folder.`);
+    } catch (err: any) {
+      if (err.code === 'auth/user-not-found') setError('No account found with this email.');
+      else setError('Could not send reset email. Please try again later.');
+      console.error(err);
+    } finally {
+      setResetLoading(false);
     }
   };
 
@@ -153,7 +175,13 @@ export default function LoginPage() {
                   </TabsList>
                   <TabsContent value="email" className="space-y-4 pt-4">
                     <div className="space-y-2"><Label htmlFor="email">Email Address</Label><Input id="email" type="email" placeholder="you@example.com" value={email} onChange={(e) => setEmail(e.target.value)} disabled={loading}/></div>
-                    <div className="space-y-2"><Label htmlFor="password">Password</Label><Input id="password" type="password" placeholder="••••••••" value={password} onChange={(e) => setPassword(e.target.value)} disabled={loading}/></div>
+                    <div className="space-y-2">
+                      <Label htmlFor="password">Password</Label>
+                      <Input id="password" type="password" placeholder="••••••••" value={password} onChange={(e) => setPassword(e.target.value)} disabled={loading}/>
+                      <div className="text-right">
+                        <Button type="button" variant="link" className="px-0 text-sm" onClick={() => { setResetOpen(true); setResetEmail(email); setResetMsg(""); setError(""); }}>Forgot password?</Button>
+                      </div>
+                    </div>
                   </TabsContent>
                   <TabsContent value="phone" className="space-y-4 pt-4">
                     <div className="space-y-2"><Label htmlFor="phone">Phone Number</Label><Input id="phone" type="tel" placeholder="+91 98765 43210" value={phoneNumber} onChange={(e) => setPhoneNumber(e.target.value)} disabled={loading}/></div>
@@ -174,6 +202,25 @@ export default function LoginPage() {
             </form>
           </CardContent>
         </Card>
+        {/* Password Reset Dialog */}
+        <Dialog open={resetOpen} onOpenChange={setResetOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Reset your password</DialogTitle>
+              <DialogDescription>Enter your email address and we will send you a password reset link.</DialogDescription>
+            </DialogHeader>
+            {resetMsg && <Alert className="mb-2"><AlertDescription>{resetMsg}</AlertDescription></Alert>}
+            {error && !resetMsg && <Alert variant="destructive" className="mb-2"><AlertDescription>{error}</AlertDescription></Alert>}
+            <div className="space-y-3">
+              <Label htmlFor="reset-email">Email</Label>
+              <Input id="reset-email" type="email" placeholder="you@example.com" value={resetEmail} onChange={(e) => setResetEmail(e.target.value)} />
+            </div>
+            <div className="flex justify-end gap-2 mt-4">
+              <Button variant="outline" onClick={() => setResetOpen(false)}>Close</Button>
+              <Button onClick={handleSendReset} disabled={resetLoading}>{resetLoading ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Sending…</> : 'Send reset link'}</Button>
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
   )

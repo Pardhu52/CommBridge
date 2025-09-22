@@ -1,422 +1,403 @@
 "use client"
 
-import { useState } from "react"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Alert, AlertDescription } from "@/components/ui/alert"
-import { CommunityStats } from "@/components/community-stats"
-import { RecentActivity } from "@/components/recent-activity"
-import {
-  MapPin,
-  Users,
-  MessageCircle,
-  Bell,
-  Settings,
-  Shield,
-  Calendar,
-  AlertTriangle,
-  CheckCircle,
-  Clock,
-  Menu,
-  Plus,
-} from "lucide-react"
+import { useState, useEffect } from "react"
+// --- FIX: Using relative paths to ensure the build tool can find the files ---
+import { useAuth } from "../../context/AuthContext"
+import { db } from "../../lib/firebase"
+import { useRouter } from "next/navigation"
+import { Button } from "../../components/ui/button"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../components/ui/card"
+import { Badge } from "../../components/ui/badge"
+import { Alert, AlertDescription } from "../../components/ui/alert"
+import { CommunityStats } from "../../components/community-stats"
+import { RecentActivity } from "../../components/recent-activity"
+import { Skeleton } from "../../components/ui/skeleton"
+import { MapPin, Users, Bell, Settings, Shield, Clock, Menu, Plus, Calendar, AlertTriangle, Edit2 } from "lucide-react"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../components/ui/tabs"
 import Link from "next/link"
+import { doc, getDoc, collection, query, where, onSnapshot, orderBy, limit, updateDoc, addDoc, deleteDoc } from "firebase/firestore"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "../../components/ui/dialog"
+import { Popover, PopoverContent, PopoverTrigger } from "../../components/ui/popover"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuLabel, DropdownMenuSeparator } from "../../components/ui/dropdown-menu"
+import { Input } from "../../components/ui/input"
+import { Textarea } from "../../components/ui/textarea"
+
+const DashboardLoadingSkeleton = () => (
+    <div className="container mx-auto px-4 py-6 space-y-6 animate-pulse">
+        <div className="flex items-center justify-between"><Skeleton className="h-12 w-1/3" /><Skeleton className="h-8 w-1/4" /></div>
+        <Skeleton className="h-10 w-full" />
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <Skeleton className="h-32 w-full" /><Skeleton className="h-32 w-full" /><Skeleton className="h-32 w-full" /><Skeleton className="h-32 w-full" />
+        </div>
+        <div className="grid lg:grid-cols-3 gap-6">
+            <div className="lg:col-span-2"><Skeleton className="h-96 w-full" /></div>
+            <div className="space-y-6"><Skeleton className="h-48 w-full" /><Skeleton className="h-48 w-full" /></div>
+        </div>
+    </div>
+);
 
 export default function DashboardPage() {
-  const [activeTab, setActiveTab] = useState("overview")
+    const { user, userData, loading: authLoading } = useAuth();
+    const router = useRouter();
+    const [communityData, setCommunityData] = useState<any>(null);
+    const [pendingMembers, setPendingMembers] = useState<any[]>([]);
+    const [members, setMembers] = useState<any[]>([]);
+    const [events, setEvents] = useState<any[]>([]);
+    const [recentActivities, setRecentActivities] = useState<any[]>([]);
+    const [loadingData, setLoadingData] = useState(true);
+    const [activeTab, setActiveTab] = useState("overview");
+    const [editOpen, setEditOpen] = useState(false);
+    const [newCommunityName, setNewCommunityName] = useState("");
+    const [createEventOpen, setCreateEventOpen] = useState(false);
+    const [newPostOpen, setNewPostOpen] = useState(false);
+    const [newPostText, setNewPostText] = useState("");
+    const [reportOpen, setReportOpen] = useState(false);
+    const [reportTitle, setReportTitle] = useState("");
+    const [reportDesc, setReportDesc] = useState("");
+    const [newEventTitle, setNewEventTitle] = useState("");
+    const [newEventDate, setNewEventDate] = useState("");
+    const [issuesResolvedCount, setIssuesResolvedCount] = useState(0);
+    const [monthlyPostsCount, setMonthlyPostsCount] = useState(0);
+    const [unresolvedIssuesCount, setUnresolvedIssuesCount] = useState(0);
+    const [notifOpen, setNotifOpen] = useState(false);
+    // Popover open state is managed by the Radix component internally
 
-  // Mock data
-  const community = {
-    name: "Sunset Apartments",
-    type: "Apartment Building",
-    memberCount: 24,
-    address: "123 Sunset Blvd, Unit 4B",
-    status: "verified",
-  }
+    useEffect(() => {
+        if (!userData) return;
 
-  const stats = {
-    totalMembers: 24,
-    activeMembers: 18,
-    pendingApprovals: 2,
-    monthlyPosts: 47,
-    upcomingEvents: 3,
-    securityScore: 92,
-    growthRate: 15,
-    issuesResolved: 8,
-  }
+        let communityUnsubscribe: () => void;
+        let pendingUnsubscribe: () => void;
+        let activityMsgUnsubscribe: () => void;
+        let activityEventUnsubscribe: () => void;
+        let activityIssueUnsubscribe: () => void;
+        let msgsActivities: any[] = [];
+        let evActivities: any[] = [];
+        let issueActivities: any[] = [];
 
-  const recentActivities = [
-    {
-      id: "1",
-      type: "issue" as const,
-      user: { name: "Sarah M.", avatar: "/diverse-woman-portrait.png" },
-      title: "Water pressure issue reported",
-      description: "Low water pressure affecting floors 3-5",
-      timestamp: "2 hours ago",
-      metadata: { replies: 8 },
-    },
-    {
-      id: "2",
-      type: "event" as const,
-      user: { name: "Mike R.", avatar: "/thoughtful-man.png" },
-      title: "Building BBQ scheduled",
-      description: "Community BBQ this Saturday at 2 PM",
-      timestamp: "5 hours ago",
-      metadata: { attendees: 15 },
-    },
-    {
-      id: "3",
-      type: "member_joined" as const,
-      user: { name: "Emma S.", avatar: "/woman-glasses.jpg" },
-      title: "New member joined",
-      description: "Emma from Unit 5C joined the community",
-      timestamp: "1 day ago",
-    },
-    {
-      id: "4",
-      type: "issue_resolved" as const,
-      user: { name: "Building Manager", avatar: "/abstract-geometric-shapes.png" },
-      title: "Elevator maintenance completed",
-      description: "Elevator in lobby is now fully operational",
-      timestamp: "2 days ago",
-    },
-  ]
+        const updateCombined = () => {
+            const combined = [...msgsActivities, ...evActivities, ...issueActivities]
+              .sort((a, b) => (b._ts || 0) - (a._ts || 0))
+              .slice(0, 4);
+            setRecentActivities(combined);
+        };
 
-  const posts = [
-    {
-      id: 1,
-      author: "Sarah M.",
-      avatar: "/diverse-woman-portrait.png",
-      time: "2 hours ago",
-      type: "issue",
-      title: "Water pressure low in building",
-      content: "Anyone else experiencing low water pressure today? Seems to be affecting floors 3-5.",
-      replies: 8,
-      likes: 12,
-    },
-    {
-      id: 2,
-      author: "Mike R.",
-      avatar: "/thoughtful-man.png",
-      time: "5 hours ago",
-      type: "event",
-      title: "Building BBQ this Saturday",
-      content: "Let's have a community BBQ in the courtyard this Saturday at 2 PM. Bring your own food!",
-      replies: 15,
-      likes: 23,
-    },
-    {
-      id: 3,
-      author: "Lisa K.",
-      avatar: "/woman-glasses.jpg",
-      time: "1 day ago",
-      type: "announcement",
-      title: "Parking reminder",
-      content: "Reminder: Guest parking is limited to 2 hours. Please inform your visitors.",
-      replies: 3,
-      likes: 8,
-    },
-  ]
+        const fetchData = () => {
+            setLoadingData(true);
 
-  const pendingMembers = [
-    {
-      id: 1,
-      name: "John D.",
-      unit: "Unit 2A",
-      joinedDate: "2 days ago",
-      status: "pending",
-    },
-    {
-      id: 2,
-      name: "Emma S.",
-      unit: "Unit 5C",
-      joinedDate: "1 day ago",
-      status: "pending",
-    },
-  ]
+            if (userData.communityId) {
+                // Real-time listener for community data
+                const communityDocRef = doc(db, "communities", userData.communityId);
+                communityUnsubscribe = onSnapshot(communityDocRef, (docSnap) => {
+                    if (docSnap.exists()) setCommunityData(docSnap.data());
+                });
 
-  const getPostIcon = (type: string) => {
-    switch (type) {
-      case "issue":
-        return <AlertTriangle className="w-4 h-4 text-orange-500" />
-      case "event":
-        return <Calendar className="w-4 h-4 text-blue-500" />
-      case "announcement":
-        return <Bell className="w-4 h-4 text-green-500" />
-      default:
-        return <MessageCircle className="w-4 h-4" />
+                // Real-time listener for recent messages (for the activity feed)
+                const messagesRef = collection(db, "communities", userData.communityId, "messages");
+                const activityMsgQuery = query(messagesRef, orderBy("timestamp", "desc"), limit(10));
+                activityMsgUnsubscribe = onSnapshot(activityMsgQuery, (snapshot) => {
+                    msgsActivities = snapshot.docs.map(docSnap => {
+                        const data: any = docSnap.data();
+                        const tsMs = data.timestamp?.toDate?.()?.getTime?.() || 0;
+                        const content = data.content || "";
+                        return {
+                            id: docSnap.id,
+                            type: "post",
+                            user: { name: data.senderEmail, avatar: "" },
+                            title: content.substring(0, 30) + (content.length > 30 ? "..." : ""),
+                            description: `New message from ${data.senderEmail}`,
+                            timestamp: data.timestamp?.toDate?.()?.toLocaleDateString?.() || "Just now",
+                            _ts: tsMs,
+                        };
+                    });
+                    updateCombined();
+                });
+
+                // Monthly posts counter
+                const now = new Date();
+                const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+                const startOfNextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+                const monthlyQuery = query(
+                  messagesRef,
+                  where("timestamp", ">=", startOfMonth),
+                  where("timestamp", "<", startOfNextMonth)
+                );
+                onSnapshot(monthlyQuery, (snapshot) => setMonthlyPostsCount(snapshot.size));
+                // Members list (verified)
+                const membersQuery = query(collection(db, "users"), where("communityId", "==", userData.communityId), where("status", "==", "verified"));
+                onSnapshot(membersQuery, (snapshot) => setMembers(snapshot.docs.map(d => ({ id: d.id, ...d.data() }))));
+
+                // Events subcollection
+                const eventsQuery = query(collection(db, "communities", userData.communityId, "events"), orderBy("date", "asc"));
+                onSnapshot(eventsQuery, (snapshot) => setEvents(snapshot.docs.map(d => ({ id: d.id, ...d.data() }))));
+
+                // Recent activity for events (use createdAt as timestamp)
+                const eventsRecentQuery = query(collection(db, "communities", userData.communityId, "events"), orderBy("createdAt", "desc"), limit(10));
+                activityEventUnsubscribe = onSnapshot(eventsRecentQuery, (snapshot) => {
+                    evActivities = snapshot.docs.map(docSnap => {
+                        const data: any = docSnap.data();
+                        const tsMs = data.createdAt ? new Date(data.createdAt).getTime() : 0;
+                        return {
+                            id: docSnap.id,
+                            type: "event",
+                            user: { name: "", avatar: "" },
+                            title: data.title || "Community Event",
+                            description: data.date ? `Event on ${data.date}` : "New event created",
+                            timestamp: data.createdAt ? new Date(data.createdAt).toLocaleDateString() : "",
+                            _ts: tsMs,
+                        };
+                    });
+                    updateCombined();
+                });
+
+                // Recent activity for issues
+                const issuesRecentQuery = query(collection(db, "communities", userData.communityId, "issues"), orderBy("createdAt", "desc"), limit(10));
+                activityIssueUnsubscribe = onSnapshot(issuesRecentQuery, (snapshot) => {
+                    issueActivities = snapshot.docs.map(docSnap => {
+                        const data: any = docSnap.data();
+                        const tsMs = data.createdAt ? new Date(data.createdAt).getTime() : 0;
+                        return {
+                            id: docSnap.id,
+                            type: "issue",
+                            user: { name: data.reporterEmail || "", avatar: "" },
+                            title: data.title || "Issue reported",
+                            description: data.description || "",
+                            timestamp: data.createdAt ? new Date(data.createdAt).toLocaleDateString() : "",
+                            metadata: { status: data.status || 'pending' },
+                            _ts: tsMs,
+                        };
+                    });
+                    updateCombined();
+                });
+
+                // Dynamic issues resolved count for this month
+                const nowIssues = new Date();
+                const startOfMonthISO = new Date(nowIssues.getFullYear(), nowIssues.getMonth(), 1).toISOString();
+                const startOfNextMonthISO = new Date(nowIssues.getFullYear(), nowIssues.getMonth() + 1, 1).toISOString();
+                const resolvedThisMonthQuery = query(
+                    collection(db, "communities", userData.communityId, "issues"),
+                    where("status", "==", "resolved"),
+                    where("resolvedAt", ">=", startOfMonthISO),
+                    where("resolvedAt", "<", startOfNextMonthISO)
+                );
+                onSnapshot(resolvedThisMonthQuery, (snapshot) => setIssuesResolvedCount(snapshot.size));
+
+                // Unresolved (pending) issues count for bell + security score
+                const pendingIssuesQuery = query(
+                    collection(db, "communities", userData.communityId, "issues"),
+                    where("status", "==", "pending")
+                );
+                onSnapshot(pendingIssuesQuery, (snapshot) => setUnresolvedIssuesCount(snapshot.size));
+            }
+
+            if (userData.status === 'verified' && userData.communityId) {
+                 // Real-time listener for pending members
+                const pendingQuery = query(collection(db, "users"), where("communityId", "==", userData.communityId), where("status", "==", "pending_approval"));
+                pendingUnsubscribe = onSnapshot(pendingQuery, (snapshot) => {
+                    setPendingMembers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+                });
+            }
+            setLoadingData(false);
+        };
+
+        fetchData();
+
+        // Cleanup listeners on component unmount
+        return () => {
+            if (communityUnsubscribe) communityUnsubscribe();
+            if (pendingUnsubscribe) pendingUnsubscribe();
+            if (activityMsgUnsubscribe) activityMsgUnsubscribe();
+            if (activityEventUnsubscribe) activityEventUnsubscribe();
+            if (activityIssueUnsubscribe) activityIssueUnsubscribe();
+        };
+    }, [userData]);
+
+    const handleTabChange = (value: string) => {
+        if (value === "feed") router.push('/messages');
+        else setActiveTab(value);
+    };
+
+    const saveCommunityName = async () => {
+        if (!userData?.communityId || !newCommunityName.trim()) return;
+        await updateDoc(doc(db, "communities", userData.communityId), { name: newCommunityName.trim() });
+        setEditOpen(false);
+    };
+
+    const resolveIssue = async (issueId: string) => {
+        if (!userData?.communityId) return;
+        await updateDoc(doc(db, 'communities', userData.communityId, 'issues', issueId), {
+            status: 'resolved',
+            resolvedAt: new Date().toISOString(),
+        });
+    };
+
+    const createEvent = async () => {
+        if (!userData?.communityId || !newEventTitle.trim() || !newEventDate.trim()) return;
+        await addDoc(collection(db, "communities", userData.communityId, "events"), {
+            title: newEventTitle.trim(),
+            date: newEventDate,
+            createdAt: new Date().toISOString(),
+        });
+        setCreateEventOpen(false);
+        setNewEventTitle("");
+        setNewEventDate("");
+    };
+
+    if (authLoading || (!userData && !authLoading)) return <DashboardLoadingSkeleton />;
+    
+    if (!userData?.communityId) {
+        return (
+            <div className="min-h-screen bg-background flex items-center justify-center">
+                <Card className="p-8 text-center"><CardTitle>Please Complete Your Setup</CardTitle><CardDescription>We couldn't find your community.</CardDescription><Button asChild className="mt-4"><Link href="/community-setup">Go to Setup</Link></Button></Card>
+            </div>
+        )
     }
-  }
 
-  return (
-    <div className="min-h-screen bg-background">
-      {/* Header */}
-      <header className="border-b bg-card/50 backdrop-blur-sm sticky top-0 z-50">
-        <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <Button variant="ghost" size="sm" className="md:hidden">
-                <Menu className="w-4 h-4" />
-              </Button>
-              <div>
-                <h1 className="text-xl font-bold">{community.name}</h1>
-                <p className="text-sm text-muted-foreground">{community.address}</p>
-              </div>
+    if (userData?.status === 'pending_approval') {
+        return (
+            <div className="min-h-screen bg-background flex items-center justify-center p-4">
+                <Card className="w-full max-w-lg text-center"><CardHeader><Clock className="w-12 h-12 mx-auto text-yellow-500 mb-4" /><CardTitle className="text-2xl">Verification Pending</CardTitle><CardDescription>Your request to join the <strong>{communityData?.name || 'community'}</strong> is awaiting approval.</CardDescription></CardHeader><CardContent><p className="text-muted-foreground">You will get full access once approved.</p></CardContent></Card>
             </div>
-            <div className="flex items-center gap-3">
-              <Badge variant={community.status === "verified" ? "default" : "secondary"} className="gap-1">
-                <Shield className="w-3 h-3" />
-                {community.status === "verified" ? "Verified" : "Pending"}
-              </Badge>
-              <Button variant="ghost" size="sm">
-                <Bell className="w-4 h-4" />
-              </Button>
-              <Button variant="ghost" size="sm" asChild>
-                <Link href="/settings">
-                  <Settings className="w-4 h-4" />
-                </Link>
-              </Button>
-            </div>
-          </div>
-        </div>
-      </header>
+        );
+    }
+    
+    if (userData?.status === 'verified' && communityData) {
+        // Derive a dynamic security score (0-100):
+        //  - 70% from verified member ratio
+        //  - 30% from unresolved issues penalty (each pending issue reduces by 5 up to -100)
+        const verifiedRatio = communityData.memberCount ? (members.length / communityData.memberCount) : 1;
+        const issuesPenalty = Math.min(100, unresolvedIssuesCount * 5);
+        const securityScore = Math.max(0, Math.round(verifiedRatio * 100 * 0.7 + (100 - issuesPenalty) * 0.3));
 
-      <div className="container mx-auto px-4 py-6">
-        <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="grid w-full grid-cols-4">
-            <TabsTrigger value="overview">Overview</TabsTrigger>
-            <TabsTrigger value="feed">Community Feed</TabsTrigger>
-            <TabsTrigger value="members">Members</TabsTrigger>
-            <TabsTrigger value="events">Events</TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="overview" className="space-y-6">
-            {/* Welcome Message */}
-            <Alert>
-              <Users className="h-4 w-4" />
-              <AlertDescription>
-                Welcome to your {community.name} community! You're now connected with {community.memberCount} verified
-                neighbors.
-              </AlertDescription>
-            </Alert>
-
-            {/* Community Stats */}
-            <CommunityStats stats={stats} />
-
-            <div className="grid lg:grid-cols-3 gap-6">
-              {/* Recent Activity */}
-              <div className="lg:col-span-2">
-                <RecentActivity activities={recentActivities} onViewAll={() => setActiveTab("feed")} />
-              </div>
-
-              {/* Sidebar */}
-              <div className="space-y-6">
-                {/* Community Info */}
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <MapPin className="w-5 h-5 text-primary" />
-                      Community Info
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-3">
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm text-muted-foreground">Type</span>
-                      <span className="text-sm font-medium">{community.type}</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm text-muted-foreground">Members</span>
-                      <span className="text-sm font-medium">{community.memberCount}</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm text-muted-foreground">Status</span>
-                      <Badge variant="outline" size="sm">
-                        Active
-                      </Badge>
-                    </div>
-                  </CardContent>
-                </Card>
-
-                {/* Quick Actions */}
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Quick Actions</CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-2">
-                    <Button variant="outline" size="sm" className="w-full justify-start bg-transparent">
-                      <Plus className="w-4 h-4 mr-2" />
-                      New Post
-                    </Button>
-                    <Button variant="outline" size="sm" className="w-full justify-start bg-transparent">
-                      <Calendar className="w-4 h-4 mr-2" />
-                      Create Event
-                    </Button>
-                    <Button variant="outline" size="sm" className="w-full justify-start bg-transparent">
-                      <AlertTriangle className="w-4 h-4 mr-2" />
-                      Report Issue
-                    </Button>
-                  </CardContent>
-                </Card>
-
-                {/* Pending Approvals */}
-                {pendingMembers.length > 0 && (
-                  <Card>
-                    <CardHeader>
-                      <CardTitle className="flex items-center gap-2">
-                        <Clock className="w-5 h-5 text-orange-500" />
-                        Pending Approvals
-                      </CardTitle>
-                      <CardDescription>New members waiting for verification</CardDescription>
-                    </CardHeader>
-                    <CardContent className="space-y-3">
-                      {pendingMembers.map((member) => (
-                        <div key={member.id} className="flex items-center justify-between p-3 border rounded-lg">
-                          <div>
-                            <p className="font-medium text-sm">{member.name}</p>
-                            <p className="text-xs text-muted-foreground">{member.unit}</p>
-                          </div>
-                          <div className="flex gap-1">
-                            <Button size="sm" variant="outline" className="h-7 px-2 bg-transparent">
-                              <CheckCircle className="w-3 h-3" />
-                            </Button>
-                            <Button size="sm" variant="outline" className="h-7 px-2 bg-transparent">
-                              <AlertTriangle className="w-3 h-3" />
-                            </Button>
-                          </div>
-                        </div>
-                      ))}
-                      <Button variant="link" size="sm" className="w-full" asChild>
-                        <Link href="/verification">View All Pending</Link>
-                      </Button>
-                    </CardContent>
-                  </Card>
-                )}
-              </div>
-            </div>
-          </TabsContent>
-
-          <TabsContent value="feed" className="space-y-4">
-            {/* Posts */}
-            <div className="space-y-4">
-              {posts.map((post) => (
-                <Card key={post.id}>
-                  <CardHeader>
-                    <div className="flex items-start justify-between">
-                      <div className="flex items-center gap-3">
-                        <Avatar className="w-10 h-10">
-                          <AvatarImage src={post.avatar || "/placeholder.svg"} alt={post.author} />
-                          <AvatarFallback>{post.author.charAt(0)}</AvatarFallback>
-                        </Avatar>
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <p className="font-medium">{post.author}</p>
-                            {getPostIcon(post.type)}
-                          </div>
-                          <p className="text-sm text-muted-foreground">{post.time}</p>
-                        </div>
-                      </div>
-                    </div>
-                  </CardHeader>
-                  <CardContent>
-                    <h3 className="font-semibold mb-2">{post.title}</h3>
-                    <p className="text-muted-foreground mb-4">{post.content}</p>
+        const stats = {
+            totalMembers: communityData.memberCount || 0,
+            activeMembers: communityData.memberCount || 0,
+            pendingApprovals: pendingMembers.length,
+            monthlyPosts: monthlyPostsCount,
+            upcomingEvents: events.length,
+            securityScore: securityScore,
+            growthRate: 0,
+            issuesResolved: issuesResolvedCount,
+        };
+        
+        return (
+            <div className="min-h-screen bg-background">
+              <header className="border-b bg-card/50 backdrop-blur-sm sticky top-0 z-50">
+                <div className="container mx-auto px-4 py-4">
+                  <div className="flex items-center justify-between">
                     <div className="flex items-center gap-4">
-                      <Button variant="ghost" size="sm">
-                        <MessageCircle className="w-4 h-4 mr-1" />
-                        {post.replies}
-                      </Button>
-                      <Button variant="ghost" size="sm">
-                        <CheckCircle className="w-4 h-4 mr-1" />
-                        {post.likes}
-                      </Button>
+                      <Button variant="ghost" size="sm" className="md:hidden"><Menu className="w-4 h-4" /></Button>
+                      <div className="flex items-center gap-2"><div><h1 className="text-xl font-bold">{communityData.name}</h1><p className="text-sm text-muted-foreground">{userData.address.full}</p></div><Button variant="ghost" size="icon" onClick={() => { setNewCommunityName(communityData.name || ""); setEditOpen(true); }}><Edit2 className="w-4 h-4" /></Button></div>
                     </div>
-                  </CardContent>
-                </Card>
-              ))}
+                    <div className="flex items-center gap-3">
+                      <Badge variant="default" className="gap-1"><Shield className="w-3 h-3" />Verified</Badge>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="sm" className="relative" aria-haspopup="menu">
+                            <Bell className="w-4 h-4" />
+                            {(pendingMembers.length + unresolvedIssuesCount + events.length) > 0 && (
+                              <span className="absolute -top-1 -right-1 text-[10px] bg-primary text-primary-foreground rounded-full min-w-4 h-4 px-1 flex items-center justify-center">
+                                {pendingMembers.length + unresolvedIssuesCount + events.length}
+                              </span>
+                            )}
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-72">
+                          <DropdownMenuLabel>Notifications</DropdownMenuLabel>
+                          {(pendingMembers.length === 0 && unresolvedIssuesCount === 0 && events.length === 0) && (
+                            <div className="px-2 py-1.5 text-sm text-muted-foreground">No notifications</div>
+                          )}
+                          {pendingMembers.length > 0 && (
+                            <>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem className="!pointer-events-none !opacity-100">Pending approvals</DropdownMenuItem>
+                              {pendingMembers.slice(0,3).map((m) => (
+                                <DropdownMenuItem key={m.id} className="!pointer-events-none !opacity-100 pl-8 text-sm">{m.email}</DropdownMenuItem>
+                              ))}
+                              <DropdownMenuItem asChild>
+                                <Link href="/verification" className="pl-8">View all</Link>
+                              </DropdownMenuItem>
+                            </>
+                          )}
+                          {unresolvedIssuesCount > 0 && (
+                            <>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem className="!pointer-events-none !opacity-100">Unresolved issues: {unresolvedIssuesCount}</DropdownMenuItem>
+                            </>
+                          )}
+                          {events.length > 0 && (
+                            <>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem className="!pointer-events-none !opacity-100">Upcoming events: {events.length}</DropdownMenuItem>
+                            </>
+                          )}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                      <Button variant="ghost" size="sm" asChild><Link href="/settings"><Settings className="w-4 h-4" /></Link></Button>
+                    </div>
+                  </div>
+                </div>
+              </header>
+              <div className="container mx-auto px-4 py-6">
+                <Tabs value={activeTab} onValueChange={handleTabChange}>
+                  <TabsList className="grid w-full grid-cols-4">
+                    <TabsTrigger value="overview">Overview</TabsTrigger>
+                    <TabsTrigger value="feed">Community Feed</TabsTrigger>
+                    <TabsTrigger value="members">Members</TabsTrigger>
+                    <TabsTrigger value="events">Events</TabsTrigger>
+                  </TabsList>
+                  <TabsContent value="overview" className="space-y-6">
+                    <Alert><Users className="h-4 w-4" /><AlertDescription>Welcome to your {communityData.name} community!</AlertDescription></Alert>
+                    <CommunityStats stats={stats} />
+                    <div className="grid lg:grid-cols-3 gap-6">
+                      <div className="lg:col-span-2"><RecentActivity activities={recentActivities} onViewAll={() => handleTabChange("feed")} onResolveIssue={resolveIssue} /></div>
+                      <div className="space-y-6">
+                        <Card><CardHeader><CardTitle className="flex items-center gap-2"><MapPin className="w-5 h-5 text-primary" />Community Info</CardTitle></CardHeader><CardContent className="space-y-3"><div className="flex items-center justify-between"><span className="text-sm text-muted-foreground">Type</span><span className="text-sm font-medium">{communityData.type}</span></div><div className="flex items-center justify-between"><span className="text-sm text-muted-foreground">Members</span><span className="text-sm font-medium">{communityData.memberCount}</span></div></CardContent></Card>
+                        <Card><CardHeader><CardTitle>Quick Actions</CardTitle></CardHeader><CardContent className="space-y-2"><Button variant="outline" size="sm" className="w-full justify-start bg-transparent" onClick={() => setNewPostOpen(true)}><Plus className="w-4 h-4 mr-2" />New Post</Button><Button variant="outline" size="sm" className="w-full justify-start bg-transparent" onClick={() => setCreateEventOpen(true)}><Calendar className="w-4 h-4 mr-2" />Create Event</Button><Button variant="outline" size="sm" className="w-full justify-start bg-transparent" onClick={() => setReportOpen(true)}><AlertTriangle className="w-4 h-4 mr-2" />Report Issue</Button></CardContent></Card>
+                        {pendingMembers.length > 0 && (
+                          <Card><CardHeader><CardTitle className="flex items-center gap-2"><Clock className="w-5 h-5 text-orange-500" />Pending Approvals</CardTitle><CardDescription>New members waiting for verification</CardDescription></CardHeader><CardContent className="space-y-3">{pendingMembers.map((member) => (<div key={member.id} className="flex items-center justify-between p-3 border rounded-lg"><div><p className="font-medium text-sm">{member.email}</p></div></div>))}<Button variant="link" size="sm" className="w-full" asChild><Link href="/verification">View All Pending</Link></Button></CardContent></Card>
+                        )}
+                      </div>
+                    </div>
+                  </TabsContent>
+                  <TabsContent value="members" className="space-y-4">
+                    {members.length === 0 ? <p className="text-sm text-muted-foreground">No members yet.</p> : (
+                      <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-3">
+                        {members.map((m) => (
+                          <Card key={m.id}><CardContent className="p-3"><p className="font-medium text-sm">{m.name || m.email}</p><p className="text-xs text-muted-foreground">{m.email}</p></CardContent></Card>
+                        ))}
+                      </div>
+                    )}
+                  </TabsContent>
+                  <TabsContent value="events" className="space-y-4">
+                    <div className="flex justify-between items-center"><h3 className="font-medium">Upcoming Events</h3><Button size="sm" variant="outline" onClick={() => setCreateEventOpen(true)}><Plus className="w-4 h-4 mr-1" />Add Event</Button></div>
+                    {events.length === 0 ? <p className="text-sm text-muted-foreground">No events scheduled.</p> : (
+                      <div className="space-y-2">
+                        {events.map(ev => (
+                          <Card key={ev.id}>
+                            <CardContent className="p-3 flex items-center justify-between">
+                              <div><p className="font-medium text-sm">{ev.title}</p><p className="text-xs text-muted-foreground">{ev.date}</p></div>
+                              <div className="flex gap-2">
+                                <Button size="sm" variant="outline" onClick={async () => { if (!userData?.communityId) return; if (!confirm('Delete this event?')) return; await deleteDoc(doc(db, 'communities', userData.communityId, 'events', ev.id)); }}>Delete</Button>
+                              </div>
+                            </CardContent>
+                          </Card>
+                        ))}
+                      </div>
+                    )}
+                  </TabsContent>
+                </Tabs>
+              </div>
+              <Dialog open={createEventOpen} onOpenChange={setCreateEventOpen}><DialogContent><DialogHeader><DialogTitle>New Event</DialogTitle><DialogDescription>Share an upcoming community event</DialogDescription></DialogHeader><div className="space-y-3"><Input placeholder="Title" value={newEventTitle} onChange={(e) => setNewEventTitle(e.target.value)} /><Input type="date" value={newEventDate} onChange={(e) => setNewEventDate(e.target.value)} /><Textarea placeholder="Description (optional)" /></div><div className="flex justify-end gap-2"><Button variant="outline" onClick={() => setCreateEventOpen(false)}>Cancel</Button><Button onClick={createEvent} disabled={!newEventTitle.trim() || !newEventDate.trim()}>Create</Button></div></DialogContent></Dialog>
+
+              {/* New Post Dialog */}
+              <Dialog open={newPostOpen} onOpenChange={setNewPostOpen}><DialogContent><DialogHeader><DialogTitle>New Post</DialogTitle><DialogDescription>Share an update with your community</DialogDescription></DialogHeader><div className="space-y-3"><Textarea placeholder="Write your post..." value={newPostText} onChange={(e) => setNewPostText(e.target.value)} rows={4} /></div><div className="flex justify-end gap-2"><Button variant="outline" onClick={() => setNewPostOpen(false)}>Cancel</Button><Button onClick={async () => { if (!userData?.communityId || !newPostText.trim()) return; await addDoc(collection(db, 'communities', userData.communityId, 'messages'), { senderId: user?.uid, senderEmail: user?.email, content: newPostText.trim(), type: 'text', timestamp: new Date() }); setNewPostText(''); setNewPostOpen(false); }}>Post</Button></div></DialogContent></Dialog>
+
+              {/* Report Issue Dialog */}
+              <Dialog open={reportOpen} onOpenChange={setReportOpen}><DialogContent><DialogHeader><DialogTitle>Report an Issue</DialogTitle><DialogDescription>Alert your community about a problem</DialogDescription></DialogHeader><div className="space-y-3"><Input placeholder="Title" value={reportTitle} onChange={(e) => setReportTitle(e.target.value)} /><Textarea placeholder="Describe the issue..." value={reportDesc} onChange={(e) => setReportDesc(e.target.value)} rows={4} /></div><div className="flex justify-end gap-2"><Button variant="outline" onClick={() => setReportOpen(false)}>Cancel</Button><Button onClick={async () => { if (!userData?.communityId || !reportTitle.trim()) return; await addDoc(collection(db, 'communities', userData.communityId, 'issues'), { title: reportTitle.trim(), description: reportDesc.trim(), status: 'pending', createdAt: new Date().toISOString(), reporterId: user?.uid, reporterEmail: user?.email }); setReportTitle(''); setReportDesc(''); setReportOpen(false); }}>Submit</Button></div></DialogContent></Dialog>
+              <Dialog open={editOpen} onOpenChange={setEditOpen}><DialogContent><DialogHeader><DialogTitle>Edit community name</DialogTitle><DialogDescription>Update the name shown at the top</DialogDescription></DialogHeader><div className="space-y-3"><Input value={newCommunityName} onChange={(e) => setNewCommunityName(e.target.value)} placeholder="Community name" /><div className="flex justify-end gap-2"><Button variant="outline" onClick={() => setEditOpen(false)}>Cancel</Button><Button onClick={saveCommunityName} disabled={!newCommunityName.trim()}>Save</Button></div></div></DialogContent></Dialog>
             </div>
-          </TabsContent>
-
-          <TabsContent value="members" className="space-y-4">
-            <Card>
-              <CardHeader>
-                <CardTitle>Community Members ({community.memberCount})</CardTitle>
-                <CardDescription>Verified residents in your building</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="grid sm:grid-cols-2 gap-4">
-                  {Array.from({ length: 8 }).map((_, i) => (
-                    <div key={i} className="flex items-center gap-3 p-3 border rounded-lg">
-                      <Avatar>
-                        <AvatarImage src={`/diverse-group-portrait.png?height=40&width=40&query=person-${i + 1}`} />
-                        <AvatarFallback>U{i + 1}</AvatarFallback>
-                      </Avatar>
-                      <div>
-                        <p className="font-medium">Resident {i + 1}</p>
-                        <p className="text-sm text-muted-foreground">Unit {Math.floor(Math.random() * 6) + 1}A</p>
-                      </div>
-                      <Badge variant="outline" size="sm" className="ml-auto">
-                        <Shield className="w-3 h-3 mr-1" />
-                        Verified
-                      </Badge>
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="events" className="space-y-4">
-            <Card>
-              <CardHeader>
-                <CardTitle>Upcoming Events</CardTitle>
-                <CardDescription>Community gatherings and activities</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  <div className="flex items-start gap-4 p-4 border rounded-lg">
-                    <div className="w-12 h-12 bg-primary/10 rounded-lg flex items-center justify-center">
-                      <Calendar className="w-6 h-6 text-primary" />
-                    </div>
-                    <div className="flex-1">
-                      <h3 className="font-semibold">Building BBQ</h3>
-                      <p className="text-sm text-muted-foreground mb-2">Saturday, 2:00 PM - Courtyard</p>
-                      <p className="text-sm">Community BBQ in the courtyard. Bring your own food!</p>
-                      <div className="flex items-center gap-2 mt-3">
-                        <Badge variant="outline" size="sm">
-                          15 attending
-                        </Badge>
-                        <Button size="sm">Join Event</Button>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex items-start gap-4 p-4 border rounded-lg">
-                    <div className="w-12 h-12 bg-primary/10 rounded-lg flex items-center justify-center">
-                      <Users className="w-6 h-6 text-primary" />
-                    </div>
-                    <div className="flex-1">
-                      <h3 className="font-semibold">Monthly Building Meeting</h3>
-                      <p className="text-sm text-muted-foreground mb-2">Next Tuesday, 7:00 PM - Community Room</p>
-                      <p className="text-sm">Discuss building maintenance and upcoming improvements.</p>
-                      <div className="flex items-center gap-2 mt-3">
-                        <Badge variant="outline" size="sm">
-                          8 attending
-                        </Badge>
-                        <Button size="sm" variant="outline">
-                          Maybe
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-        </Tabs>
-      </div>
-    </div>
-  )
+        );
+      }
+      return null; // Return null or a generic error/redirect page if no condition is met
 }
+
