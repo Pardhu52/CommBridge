@@ -17,7 +17,7 @@
         logger.info(`User ${userId} has status 'pending_verification'. Starting community search.`);
         const { latitude, longitude } = newData.location as GeoPoint;
         const userLocation: [number, number] = [latitude, longitude];
-        const searchRadiusInKm = 5;
+        const searchRadiusInKm = 1;
         const bounds = geohashQueryBounds(userLocation, searchRadiusInKm * 1000);
         const promises = bounds.map(b => db.collection("communities").orderBy("geohash").startAt(b[0]).endAt(b[1]).get());
         const snapshots = await Promise.all(promises);
