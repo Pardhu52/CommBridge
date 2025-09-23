@@ -277,7 +277,7 @@ export default function HomePage() {
               <span className="text-xl font-bold">CommBridge</span>
             </div>
             <p className="text-muted-foreground text-center md:text-right">
-              © 2024 CommBridge. Connecting communities securely.
+              © 2025 CommBridge. Connecting communities securely.
             </p>
           </div>
         </div>
